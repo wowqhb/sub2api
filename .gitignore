@@ -160,3 +160,6 @@ output/
 /plugins/
 __pycache__/
 *.zip
+/deploy/postgres-data/
+/deploy/redis-data/
+/deploy/sub2api-data/
