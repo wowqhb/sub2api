@@ -485,7 +485,7 @@ export default {
         grokUsed: '已用 $',
         grokBalance: '余额 $',
         grokPrepaid: '预付余额',
-        grokMonthlyLimit: '月度已用/上限（USD）',
+        grokMonthlyLimit: '月度已用/上限（¥）',
         grokOverage: '超额 onDemandUsed/onDemandCap',
         grokOverageShort: '超额 $',
         grokUnknown: 'Grok 配额需等待首次上游响应返回 xAI rate-limit 头后显示。',

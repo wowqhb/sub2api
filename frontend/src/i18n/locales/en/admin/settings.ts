@@ -427,8 +427,8 @@ export default {
       },
       platformQuota: {
         platform:    'Platform',
-        daily:       'Daily (USD)',
-        weekly:      'Weekly (USD)',
+        daily:       'Daily (CNY)',
+        weekly:      'Weekly (CNY)',
         monthly:     'Monthly (USD, 30d rolling)',
         placeholder: 'Unlimited',
       },
