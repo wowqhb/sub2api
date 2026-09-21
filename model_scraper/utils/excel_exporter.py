@@ -3,7 +3,7 @@
 """
 Excel导出工具
 将抓取到的模型数据导出到Excel文件
-不同结构的表格存储到各自的页签中
+所有表格存放在同一页签中（"模型价格汇总"），每个表格之间留出间距
 
 支持两种数据格式：
 1. 模型列表格式（旧）：每个模型是一个字典，section_title 字段标识分类
@@ -16,6 +16,10 @@ from typing import List, Dict, Any
 from datetime import datetime
 import os
 import re
+
+# 提前导入以避免循环引用问题
+from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
 
 
 class ExcelExporter:
@@ -241,7 +245,7 @@ class ExcelExporter:
     def _export_tables(self, wb, tables, header_font, header_fill,
                        header_alignment, thin_border, source_url):
         """
-        导出表格格式数据，每个表格单独一个工作表
+        导出表格格式数据，所有表格放在同一工作表中，表格之间留出空行间距
 
         Args:
             wb: Workbook对象
@@ -250,39 +254,105 @@ class ExcelExporter:
         """
         from openpyxl.styles import Font as OpenpyxlFont
 
-        used_sheet_names = set()
+        # 创建单一工作表
+        sheet_name = "模型价格汇总"
+        ws = wb.create_sheet(title=sheet_name)
 
-        for table in tables:
+        # 表格之间的间距行数
+        GAP_ROWS = 3
+
+        # 当前写入行号
+        current_row = 1
+
+        for table_idx, table in enumerate(tables):
             section_title = table.get("section_title", "模型列表")
             rows = table.get("rows", [])
             header_row_count = table.get("header_row_count", 1)
             merges = table.get("merges", [])
 
-            # 生成唯一的工作表名
-            sheet_name = self._sanitize_sheet_name(section_title)
-            counter = 1
-            original_name = sheet_name
-            while sheet_name in used_sheet_names:
-                suffix = f"_{counter}"
-                max_base_len = 31 - len(suffix)
-                sheet_name = original_name[:max_base_len] + suffix
-                counter += 1
+            if not rows:
+                continue
 
-            used_sheet_names.add(sheet_name)
+            # 计算此表格的最大列数（用于调整列宽）
+            max_cols = max(len(row) for row in rows) if rows else 0
 
-            # 创建工作表
-            ws = wb.create_sheet(title=sheet_name)
+            # 写入表格标题行（在表格上方）
+            if section_title and section_title != "模型列表":
+                title_cell = ws.cell(
+                    row=current_row, column=1, value=section_title)
+                title_cell.font = OpenpyxlFont(
+                    bold=True, size=14, color="333333")
+                title_cell.alignment = header_alignment
+                current_row += 1
 
-            # 写入表格数据（保持原表结构，支持单元格合并）
-            self._write_table_rows(ws, rows, header_font, header_fill,
-                                   header_alignment, thin_border, header_row_count, merges)
+            # 写入表格数据
+            start_row = current_row
+            for row_idx, row in enumerate(rows):
+                for col_idx in range(1, max_cols + 1):
+                    cell_value = row[col_idx - 1] if col_idx - \
+                        1 < len(row) else ""
 
-            # 如果有数据来源，添加到最后一行的下一行
-            if source_url and rows:
-                last_row = len(rows) + 2
-                ws.cell(row=last_row, column=1,
-                        value="数据来源").font = OpenpyxlFont(bold=True)
-                ws.cell(row=last_row, column=2, value=source_url)
+                    cell = ws.cell(row=start_row + row_idx,
+                                   column=col_idx, value=cell_value)
+                    cell.border = thin_border
+
+                    if row_idx < header_row_count:
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                    else:
+                        cell.alignment = Alignment(
+                            wrap_text=True, vertical='top')
+
+            # 应用单元格合并（需要根据起始行调整）
+            for merge in merges:
+                try:
+                    s_row = start_row + merge['start_row']
+                    s_col = merge['start_col'] + 1
+                    e_row = start_row + merge['end_row']
+                    e_col = merge['end_col'] + 1
+
+                    range_str = f"{get_column_letter(s_col)}{s_row}:{get_column_letter(e_col)}{e_row}"
+                    ws.merge_cells(range_str)
+
+                    master_cell = ws.cell(row=s_row, column=s_col)
+                    master_cell.alignment = header_alignment
+                except Exception:
+                    pass
+
+            # 调整列宽（只在第一个表格时设置，后续表格沿用）
+            if table_idx == 0:
+                for col_idx in range(1, max_cols + 1):
+                    max_len = 0
+                    for row in rows:
+                        if col_idx - 1 < len(row):
+                            cell_text = str(row[col_idx - 1])
+                            line_lengths = [len(line)
+                                            for line in cell_text.split('\n')]
+                            if line_lengths:
+                                max_len = max(max_len, max(line_lengths))
+
+                    col_width = min(max(max_len + 2, 12), 50)
+                    ws.column_dimensions[get_column_letter(
+                        col_idx)].width = col_width
+
+            # 更新当前行：表格占用行数 + 间距
+            current_row = start_row + len(rows) + GAP_ROWS
+
+        # 如果有数据来源，添加到最后一行的下一行
+        if source_url and tables:
+            source_cell = ws.cell(row=current_row, column=1, value="数据来源")
+            source_cell.font = OpenpyxlFont(
+                bold=True, italic=True, color="666666")
+            ws.cell(row=current_row, column=2, value=source_url).font = OpenpyxlFont(
+                italic=True, color="666666")
+
+        # 设置表头行高
+        if tables:
+            # 为每个表头行设置较高行高
+            for row_idx in range(1, current_row):
+                if ws.cell(row=row_idx, column=1).fill and ws.cell(row=row_idx, column=1).fill.start_color.rgb == "004472C4":
+                    ws.row_dimensions[row_idx].height = 30
 
     def _export_model_lists(self, wb, models, header_font, header_fill,
                             header_alignment, thin_border, source_url):
